@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NYC DOT — Press Release Formatter</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --border: #30363d;
+            --accent: #1d6fa3;
+            --green: #3fb950;
+            --red: #f85149;
+            --yellow: #d29922;
+            --text: #e6edf3;
+            --muted: #8b949e;
+            --mono: 'IBM Plex Mono', monospace;
+            --sans: 'IBM Plex Sans', sans-serif;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--sans);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            border-bottom: 1px solid var(--border);
+            padding: 14px 28px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: var(--surface);
+            flex-shrink: 0;
+        }
+
+        .logo-badge {
+            background: var(--accent);
+            color: #fff;
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        header h1 {
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        header span {
+            font-size: 13px;
+            color: var(--muted);
+            font-weight: 300;
+        }
+
+        .tag-free {
+            margin-left: auto;
+            font-family: var(--mono);
+            font-size: 10px;
+            background: #1a2d1a;
+            color: var(--green);
+            border: 1px solid #2a4a2a;
+            padding: 3px 8px;
+            border-radius: 4px;
+            letter-spacing: 0.06em;
+        }
+
+        .main {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            flex: 1;
+            overflow: hidden;
+            height: calc(100vh - 53px);
+        }
+
+        .panel {
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .panel:last-child {
+            border-right: none;
+        }
+
+        .panel-header {
+            padding: 10px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--surface);
+            flex-shrink: 0;
+        }
+
+        .panel-label {
+            font-family: var(--mono);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            color: var(--muted);
+            text-transform: uppercase;
+        }
+
+        textarea {
+            flex: 1;
+            width: 100%;
+            background: var(--bg);
+            color: var(--text);
+            border: none;
+            resize: none;
+            font-family: var(--mono);
+            font-size: 12.5px;
+            line-height: 1.7;
+            padding: 18px 20px;
+            outline: none;
+            overflow-y: auto;
+        }
+
+        textarea::placeholder {
+            color: var(--muted);
+        }
+
+        .output-wrap {
+            flex: 1;
+            overflow-y: auto;
+            background: var(--bg);
+            position: relative;
+        }
+
+        #htmlOutput {
+            font-family: var(--mono);
+            font-size: 12px;
+            line-height: 1.75;
+            padding: 18px 20px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            min-height: 100%;
+        }
+
+        .placeholder-msg {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: var(--muted);
+            pointer-events: none;
+            width: 80%;
+        }
+
+        .placeholder-msg .icon {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .placeholder-msg p {
+            font-size: 13px;
+            line-height: 1.7;
+        }
+
+        #warningBanner {
+            display: none;
+            padding: 8px 20px;
+            background: #2a1f00;
+            border-bottom: 1px solid #5a3e00;
+            font-size: 11.5px;
+            color: var(--yellow);
+            font-family: var(--mono);
+            flex-shrink: 0;
+            line-height: 1.8;
+        }
+
+        .toolbar {
+            padding: 10px 16px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--surface);
+            flex-shrink: 0;
+        }
+
+        .btn {
+            font-family: var(--sans);
+            font-size: 13px;
+            font-weight: 600;
+            padding: 7px 16px;
+            border-radius: 6px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+
+        .btn-primary:hover {
+            background: #1a5f8e;
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--muted);
+            border-color: var(--border);
+        }
+
+        .btn-ghost:hover:not(:disabled) {
+            color: var(--text);
+            border-color: var(--muted);
+        }
+
+        .btn-ghost:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+
+        .btn-ok {
+            background: transparent;
+            color: var(--green);
+            border-color: var(--green);
+        }
+
+        .char-count {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--muted);
+            margin-left: auto;
+        }
+
+        ::-webkit-scrollbar {
+            width: 5px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <div class="logo-badge">NYC DOT</div>
+        <h1>Press Release Formatter</h1>
+        <span>— pure JS, zero API cost</span>
+        <div class="tag-free">FREE / LOCAL</div>
+    </header>
+
+    <div class="main">
+
+        <div class="panel">
+            <div class="panel-header">
+                <span class="panel-label">01 — Paste Raw Text</span>
+                <span class="char-count" id="charCount">0 chars</span>
+            </div>
+            <textarea id="inputText"
+                placeholder="Paste the press release email here...&#10;&#10;The formatter will:&#10;  ✓  Extract the title  →  &lt;h2 id=&quot;page_subtitle&quot;&gt;&#10;  ✓  Summary bullets   →  &lt;p align=&quot;center&quot;&gt;&lt;em&gt;&#10;  ✓  Speaker names     →  &lt;strong&gt;&#10;  ✓  Image captions    →  &lt;img&gt; + &lt;em&gt;&#10;  ✓  Closing marker    →  &lt;div class=&quot;thirty&quot;&gt;###&lt;/div&gt;&#10;  ✓  Strips email header/footer"></textarea>
+            <div class="toolbar">
+                <button class="btn btn-primary" onclick="runFormatter()">⚡ Format HTML</button>
+                <button class="btn btn-ghost" onclick="clearAll()">Clear</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <span class="panel-label">02 — HTML Output</span>
+            </div>
+            <div id="warningBanner"></div>
+            <div class="output-wrap">
+                <div id="placeholder" class="placeholder-msg">
+                    <div class="icon">📋</div>
+                    <p>Your formatted HTML will appear here.<br>Paste a press release and hit <strong>Format
+                            HTML</strong>.</p>
+                </div>
+                <div id="htmlOutput"></div>
+            </div>
+            <div class="toolbar">
+                <button class="btn btn-ghost" id="copyBtn" onclick="copyHTML()" disabled>Copy HTML</button>
+                <button class="btn btn-ghost" id="previewBtn" onclick="openPreview()" disabled>Preview</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // ================================================================
+        //  NYC DOT PRESS RELEASE FORMATTER — Pure JS, no API, no cost
+        // ================================================================
+
+
+        // ----------------------------------------------------------------
+        // 1. STRIP PATTERNS
+        // Lines matching any of these get removed before we parse anything.
+        // These are lines from the email wrapper, not the press release itself.
+        // ----------------------------------------------------------------
+        const STRIP_PATTERNS = [
+            /^FOR IMMEDIATE RELEASE/i,
+            /^CONTACT:/i,
+            /^This email was sent/i,
+            /^NYC Department of Transportation,\s*\d+/i,
+            /^Unsubscribe/i,
+        ];
+
+
+        // ----------------------------------------------------------------
+        // 2. CAPTION DETECTION
+        // A paragraph is treated as an image caption if it:
+        //   - is short (under 320 chars), AND
+        //   - contains at least one visual/spatial keyword
+        // Captions get wrapped in <img> + <em> blocks instead of plain <p>.
+        // ----------------------------------------------------------------
+        const CAPTION_KEYWORDS = [
+            'pictured', 'shown', 'above in', 'in orange', 'in blue',
+            'project scope', 'limit visibility', 'ambiguous space',
+            'support columns', 'foreground', 'background'
+        ];
+
+        function looksLikeCaption(text) {
+            const lower = text.toLowerCase();
+            return text.length < 320 && CAPTION_KEYWORDS.some(kw => lower.includes(kw));
+        }
+
+
+        // ----------------------------------------------------------------
+        // 3. ATTRIBUTION WRAPPING
+        // Finds "said [Name, Title]." patterns and wraps the name in <strong>.
+        //
+        // Regex breakdown:
+        //   \bsaid\s+              → word "said" + whitespace
+        //   (                      → start capture group
+        //     [A-Z]                → name must start with a capital letter
+        //     [A-Za-z accented\s   → letters (including accented like Cabán),
+        //       \-',.]+?           →   spaces, hyphens, apostrophes, commas — lazy
+        //     [A-Za-z accented]    → must END on a letter (not a comma/space)
+        //   )                      → end capture group
+        //   (?=\.\s|\.$|\.")       → lookahead: must be followed by ". " or end or ."
+        // ----------------------------------------------------------------
+        function wrapAttributions(text) {
+            return text.replace(
+                /\bsaid\s+([A-Z][A-Za-z\u00C0-\u024F\s\-',.]+?[A-Za-z\u00C0-\u024F])(?=\.\s|\.$|\.")/g,
+                (match, name) => `said <strong>${name.trim()}</strong>`
+            );
+        }
+
+
+        // ----------------------------------------------------------------
+        // 4. FILENAME GENERATOR
+        // Converts a caption string into a kebab-case filename.
+        // "The 2025 project scope..." → "the-2025-project-scope..."
+        // The user still needs to verify/update the actual filename manually.
+        // ----------------------------------------------------------------
+        function captionToFilename(caption) {
+            return caption
+                .toLowerCase()
+                .replace(/[^a-z0-9\s]/g, '')   // strip punctuation
+                .trim()
+                .replace(/\s+/g, '-')           // spaces → hyphens
+                .slice(0, 45)                   // limit length
+                .replace(/-+$/, '');            // no trailing hyphen
+        }
+
+
+        // ----------------------------------------------------------------
+        // 5. MAIN FORMATTER
+        // Returns { html: string, warnings: string[] }
+        // ----------------------------------------------------------------
+        function formatPressRelease(rawText) {
+            const warnings = [];
+            const htmlParts = [];
+
+            // -- Strip email wrapper lines, split into clean lines --
+            const lines = rawText
+                .split('\n')
+                .map(l => l.trim())
+                .filter(l => !STRIP_PATTERNS.some(p => p.test(l)));
+
+            // -- Group lines into paragraph blocks (blank lines = block separator) --
+            const blocks = [];
+            let current = [];
+            for (const line of lines) {
+                if (line === '') {
+                    if (current.length > 0) {
+                        blocks.push(current.join(' ').trim());
+                        current = [];
+                    }
+                } else {
+                    current.push(line);
+                }
+            }
+            if (current.length > 0) blocks.push(current.join(' ').trim());
+
+            // Filter empty strings
+            const paragraphs = blocks.filter(b => b.length > 1);
+            if (paragraphs.length === 0) return { html: '<p>No content detected.</p>', warnings: [] };
+
+            // -- Title: always the first paragraph block --
+            htmlParts.push(`<h2 id="page_subtitle">${paragraphs[0]}</h2>`);
+
+            // -- Find the body start: paragraph that opens with "NEW YORK –" --
+            // Everything before this is considered pre-body (summaries/captions).
+            const bodyStartIdx = paragraphs.findIndex(
+                (p, i) => i > 0 && /^NEW YORK\s*[–—\-]/.test(p)
+            );
+
+            // If not found, assume body starts at index 2 (after title + 1 summary)
+            const bodyIdx = bodyStartIdx === -1 ? 2 : bodyStartIdx;
+            if (bodyStartIdx === -1) {
+                warnings.push('Could not find "NEW YORK –" body opener. Body assumed to start at paragraph 2.');
+            }
+
+            // -- Pre-body: italic summary bullets and first image caption --
+            const preBody = paragraphs.slice(1, bodyIdx);
+            for (const block of preBody) {
+                if (looksLikeCaption(block)) {
+                    const fn = captionToFilename(block);
+                    htmlParts.push(
+                        `<p align="center" style="margin-bottom: 0px;"><img src="../../images/pr2026/${fn}.jpg" alt="${block}"></img>\n</p>`,
+                        `<p align="center"><em>${block}</em></p>`
+                    );
+                    warnings.push(`Image placeholder → update filename: "${fn}.jpg"`);
+                } else {
+                    htmlParts.push(`<p align="center"><em>${block}</em></p>`);
+                }
+            }
+
+            // -- Body paragraphs --
+            for (const para of paragraphs.slice(bodyIdx)) {
+                if (para === '###') {
+                    htmlParts.push(`\n<div class="thirty">###</div>`);
+
+                } else if (looksLikeCaption(para)) {
+                    const fn = captionToFilename(para);
+                    htmlParts.push(
+                        `<p align="center" style="margin-bottom: 0px;"><img src="../../images/pr2026/${fn}.jpg" alt="${para}"></img>\n</p>`,
+                        `<p align="center"><em>${para}</em></p>`
+                    );
+                    warnings.push(`Image placeholder → update filename: "${fn}.jpg"`);
+
+                } else {
+                    // Regular paragraph — wrap speaker attributions in <strong>
+                    htmlParts.push(`<p>${wrapAttributions(para)}</p>`);
+                }
+            }
+
+            return { html: htmlParts.join('\n\n'), warnings };
+        }
+
+
+        // ================================================================
+        //  UI
+        // ================================================================
+
+        let lastHTML = '';
+
+        document.getElementById('inputText').addEventListener('input', function () {
+            document.getElementById('charCount').textContent = this.value.length.toLocaleString() + ' chars';
+        });
+
+        function runFormatter() {
+            const input = document.getElementById('inputText').value.trim();
+            if (!input) { alert('Paste a press release first.'); return; }
+
+            const { html, warnings } = formatPressRelease(input);
+            lastHTML = html;
+
+            document.getElementById('placeholder').style.display = 'none';
+            renderHighlighted(html);
+
+            const banner = document.getElementById('warningBanner');
+            if (warnings.length > 0) {
+                banner.style.display = 'block';
+                banner.innerHTML = warnings.map(w => `⚠ ${w}`).join('<br>');
+            } else {
+                banner.style.display = 'none';
+            }
+
+            document.getElementById('copyBtn').disabled = false;
+            document.getElementById('previewBtn').disabled = false;
+        }
+
+        // Escape HTML for display, then re-colorize the <tags> for readability
+        function renderHighlighted(html) {
+            const escaped = html
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+
+            // Color the tags green
+            const colored = escaped.replace(
+                /(&lt;\/?[\w][^&]*?&gt;)/g,
+                '<span style="color:#7ee787">$1</span>'
+            );
+
+            document.getElementById('htmlOutput').innerHTML = colored;
+        }
+
+        function copyHTML() {
+            if (!lastHTML) return;
+            navigator.clipboard.writeText(lastHTML).then(() => {
+                const btn = document.getElementById('copyBtn');
+                btn.textContent = '✓ Copied!';
+                btn.classList.add('btn-ok');
+                setTimeout(() => {
+                    btn.textContent = 'Copy HTML';
+                    btn.classList.remove('btn-ok');
+                }, 2000);
+            });
+        }
+
+        function openPreview() {
+            if (!lastHTML) return;
+            const win = window.open('', '_blank');
+            win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>
+  body { font-family: Arial, sans-serif; max-width: 820px; margin: 40px auto; padding: 0 24px; line-height: 1.65; color: #222; }
+  h2 { font-size: 1.3rem; margin-bottom: 20px; }
+  img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+  .thirty { text-align: center; margin-top: 30px; font-weight: bold; }
+</style></head><body>${lastHTML}</body></html>`);
+            win.document.close();
+        }
+
+        function clearAll() {
+            document.getElementById('inputText').value = '';
+            document.getElementById('htmlOutput').innerHTML = '';
+            document.getElementById('charCount').textContent = '0 chars';
+            document.getElementById('placeholder').style.display = 'block';
+            document.getElementById('copyBtn').disabled = true;
+            document.getElementById('previewBtn').disabled = true;
+            document.getElementById('warningBanner').style.display = 'none';
+            lastHTML = '';
+        }
+    </script>
+</body>
+
+</html>
