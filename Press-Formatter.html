@@ -22,7 +22,6 @@
             --border: #30363d;
             --accent: #1d6fa3;
             --green: #3fb950;
-            --red: #f85149;
             --yellow: #d29922;
             --text: #e6edf3;
             --muted: #8b949e;
@@ -140,6 +139,43 @@
             color: var(--muted);
         }
 
+        #pasteMode {
+            padding: 5px 20px;
+            font-family: var(--mono);
+            font-size: 11px;
+            border-top: 1px solid var(--border);
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--surface);
+        }
+
+        #pasteMode .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--muted);
+            flex-shrink: 0;
+        }
+
+        #pasteMode.html {
+            background: #0d1f2d;
+            border-top-color: #1a3a55;
+        }
+
+        #pasteMode.html .dot {
+            background: var(--green);
+        }
+
+        #pasteMode.html .lbl {
+            color: var(--green);
+        }
+
+        #pasteMode.plain .lbl {
+            color: var(--muted);
+        }
+
         .output-wrap {
             flex: 1;
             overflow-y: auto;
@@ -190,6 +226,17 @@
             line-height: 1.8;
         }
 
+        #infoBanner {
+            padding: 7px 20px;
+            background: #0d1f2d;
+            border-bottom: 1px solid #1a3a55;
+            font-size: 11px;
+            color: #79c0ff;
+            font-family: var(--mono);
+            flex-shrink: 0;
+            line-height: 1.7;
+        }
+
         .toolbar {
             padding: 10px 16px;
             border-top: 1px solid var(--border);
@@ -209,9 +256,6 @@
             border: 1px solid transparent;
             cursor: pointer;
             transition: all 0.15s;
-            display: flex;
-            align-items: center;
-            gap: 5px;
         }
 
         .btn-primary {
@@ -285,7 +329,11 @@
                 <span class="char-count" id="charCount">0 chars</span>
             </div>
             <textarea id="inputText"
-                placeholder="Paste the press release email here...&#10;&#10;The formatter will:&#10;  ✓  Extract the title  →  &lt;h2 id=&quot;page_subtitle&quot;&gt;&#10;  ✓  Summary bullets   →  &lt;p align=&quot;center&quot;&gt;&lt;em&gt;&#10;  ✓  Speaker names     →  &lt;strong&gt;&#10;  ✓  Image captions    →  &lt;img&gt; + &lt;em&gt;&#10;  ✓  Closing marker    →  &lt;div class=&quot;thirty&quot;&gt;###&lt;/div&gt;&#10;  ✓  Strips email header/footer"></textarea>
+                placeholder="Paste the press release email here...&#10;&#10;  ✓  Title (auto title-cases ALL CAPS)&#10;  ✓  Summary bullets    →  &lt;p&gt;&lt;em&gt;&#10;  ✓  Speaker names      →  &lt;strong&gt;&#10;  ✓  Image captions     →  &lt;img&gt;&#10;  ✓  Section headers    →  &lt;h4&gt;&#10;  ✓  List intros        →  &lt;p&gt;&lt;strong&gt;&#10;  ✓  Bullet lists       →  &lt;ul&gt;&lt;li&gt;&#10;  ✓  Italic text        →  &lt;em&gt; (from email HTML)&#10;  ✓  Hyperlinks         →  &lt;a&gt; (from email HTML, skips tracking URLs)&#10;  ✓  Plain URLs in text →  &lt;a&gt;&#10;  ✓  Strips email header/footer"></textarea>
+            <div id="pasteMode" class="plain">
+                <span class="dot"></span>
+                <span class="lbl">Waiting for paste...</span>
+            </div>
             <div class="toolbar">
                 <button class="btn btn-primary" onclick="runFormatter()">⚡ Format HTML</button>
                 <button class="btn btn-ghost" onclick="clearAll()">Clear</button>
@@ -295,6 +343,11 @@
         <div class="panel">
             <div class="panel-header">
                 <span class="panel-label">02 — HTML Output</span>
+            </div>
+            <div id="infoBanner">
+                ℹ Paste from email: links &amp; italics are read from the hidden HTML clipboard and overlaid
+                automatically.
+                Tracking redirect URLs (e.g. Meltwater) are skipped — add those links manually.
             </div>
             <div id="warningBanner"></div>
             <div class="output-wrap">
@@ -307,6 +360,7 @@
             </div>
             <div class="toolbar">
                 <button class="btn btn-ghost" id="copyBtn" onclick="copyHTML()" disabled>Copy HTML</button>
+                <button class="btn btn-ghost" id="downloadBtn" onclick="downloadHTML()" disabled>Download</button>
                 <button class="btn btn-ghost" id="previewBtn" onclick="openPreview()" disabled>Preview</button>
             </div>
         </div>
@@ -315,14 +369,17 @@
 
     <script>
         // ================================================================
-        //  NYC DOT PRESS RELEASE FORMATTER — Pure JS, no API, no cost
+        //  NYC DOT PRESS RELEASE FORMATTER v6
+        //  Pure JS — no API, no cost, works offline / GitHub Pages
+        //
+        //  Structure:  plain text → line-based block grouper (v4, proven)
+        //  Inline tags: HTML clipboard → extract <em> and <a> → overlay
+        //               onto plain text blocks after structure is parsed
         // ================================================================
 
 
         // ----------------------------------------------------------------
-        // 1. STRIP PATTERNS
-        // Lines matching any of these get removed before we parse anything.
-        // These are lines from the email wrapper, not the press release itself.
+        // STRIP PATTERNS — email header/footer lines to remove
         // ----------------------------------------------------------------
         const STRIP_PATTERNS = [
             /^FOR IMMEDIATE RELEASE/i,
@@ -332,116 +389,325 @@
             /^Unsubscribe/i,
         ];
 
+        // Domains used by PR wire services for click-tracking redirects.
+        // Links pointing to these are useless for us — skip them.
+        const TRACKING_DOMAINS = [
+            'meltwater.com', 'mediaoutreach', 'mailchimp.com',
+            'sendgrid.net', 'constantcontact.com', 'mailgun.org',
+            'mktoclick.com', 'click.em', 'track.', 'trk.'
+        ];
+
+        function isTrackingURL(href) {
+            return TRACKING_DOMAINS.some(d => href.includes(d));
+        }
+
 
         // ----------------------------------------------------------------
-        // 2. CAPTION DETECTION
-        // A paragraph is treated as an image caption if it:
-        //   - is short (under 320 chars), AND
-        //   - contains at least one visual/spatial keyword
-        // Captions get wrapped in <img> + <em> blocks instead of plain <p>.
+        // TITLE CASE
+        // Applied when title arrives in ALL CAPS.
+        // Keeps acronyms (NYC, DOT, MTA) uppercase.
+        // Minor words (to, of, the…) go lowercase unless first word.
         // ----------------------------------------------------------------
+        const MINOR_WORDS = new Set([
+            'a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor', 'on', 'at',
+            'to', 'by', 'in', 'of', 'up', 'as', 'is', 'it', 'vs', 'via', 'with', 'from'
+        ]);
+
+        function isAllCaps(str) {
+            const alpha = str.replace(/[^a-zA-Z]/g, '');
+            const upper = str.replace(/[^A-Z]/g, '');
+            return alpha.length > 5 && (upper.length / alpha.length) > 0.7;
+        }
+
+        function toTitleCase(str) {
+            const tokens = str.split(/(\s+)/);
+            let wi = 0;
+            return tokens.map(token => {
+                if (/^\s+$/.test(token)) return token;
+                const isFirst = wi++ === 0;
+                const letters = token.replace(/[^a-zA-Z]/g, '');
+                // Treat as acronym only if: all uppercase AND 4 letters or fewer.
+                // This keeps NYC, DOT, MTA, DCAS intact but converts SELL → Sell,
+                // LIMITED → Limited, etc. when the whole title comes in as ALL CAPS.
+                if (letters.length >= 2 && letters.length <= 4 && letters === letters.toUpperCase()) return token;
+                const lower = token.toLowerCase();
+                if (isFirst) return lower[0].toUpperCase() + lower.slice(1);
+                if (MINOR_WORDS.has(letters.toLowerCase())) return lower;
+                return lower[0].toUpperCase() + lower.slice(1);
+            }).join('');
+        }
+
+        function maybeToTitleCase(str) {
+            // Always apply title case — toTitleCase() already preserves
+            // acronyms (NYC, DOT, MTA, etc.) so this is safe universally.
+            return toTitleCase(str);
+        }
+
+
+        // ----------------------------------------------------------------
+        // BLOCK HELPERS — same as v4
+        // ----------------------------------------------------------------
+        function looksLikeBullet(text) {
+            // Covers: · • * - and common Unicode bullets (▪ ◦ ‣ ➤ ➢ ○ ●)
+            // Also handles lines that start with whitespace/special chars before the bullet
+            return /^[\s\u00a0\u200b\ufeff]*[·•\-\*\u25aa\u25cf\u25cb\u2022\u2023\u2043]/.test(text);
+        }
+        function stripBullet(text) {
+            return text
+                // Strip any leading special whitespace/invisible chars first
+                .replace(/^[\s\u00a0\u200b\u200c\u200d\ufeff]+/, '')
+                // Strip the bullet character itself
+                .replace(/^[·•\-\*\u25aa\u25cf\u25cb\u2022\u2023\u2043]/, '')
+                // Strip ALL remaining leading whitespace and special chars after the bullet
+                .replace(/^[\s\u00a0\u200b\u200c\u200d\u202f\u205f\u2009\u200a\ufeff\t]+/, '')
+                .trim();
+        }
+
         const CAPTION_KEYWORDS = [
             'pictured', 'shown', 'above in', 'in orange', 'in blue',
             'project scope', 'limit visibility', 'ambiguous space',
             'support columns', 'foreground', 'background'
         ];
-
         function looksLikeCaption(text) {
             const lower = text.toLowerCase();
             return text.length < 320 && CAPTION_KEYWORDS.some(kw => lower.includes(kw));
         }
 
+        function looksLikeHeader(text) {
+            if (/^About\s+[A-Z]/.test(text)) return true;
+            return (
+                text.length < 80 &&
+                /^[A-Z]/.test(text) &&
+                !/[."]$/.test(text) &&
+                !/"/.test(text) &&
+                !/\bsaid\b/i.test(text)
+            );
+        }
+
 
         // ----------------------------------------------------------------
-        // 3. ATTRIBUTION WRAPPING
-        // Finds "said [Name, Title]." patterns and wraps the name in <strong>.
-        //
-        // Regex breakdown:
-        //   \bsaid\s+              → word "said" + whitespace
-        //   (                      → start capture group
-        //     [A-Z]                → name must start with a capital letter
-        //     [A-Za-z accented\s   → letters (including accented like Cabán),
-        //       \-',.]+?           →   spaces, hyphens, apostrophes, commas — lazy
-        //     [A-Za-z accented]    → must END on a letter (not a comma/space)
-        //   )                      → end capture group
-        //   (?=\.\s|\.$|\.")       → lookahead: must be followed by ". " or end or ."
+        // URL LINKIFIER — only fires if no <a> already in the text
+        // ----------------------------------------------------------------
+        function linkifyURLs(text) {
+            if (text.includes('<a ')) return text;
+            return text.replace(
+                /((https?:\/\/|www\.|nyc\.gov\/)[^\s<>"']+?)([.,;:)?!]?(?=\s|$))/g,
+                (_, url, _p, trailing) => {
+                    const href = url.startsWith('http') ? url : `https://${url}`;
+                    return `<a href="${href}">${url}</a>${trailing || ''}`;
+                }
+            );
+        }
+
+
+        // ----------------------------------------------------------------
+        // ATTRIBUTION WRAPPING
+        // "said [Name, Title]." → said <strong>[Name, Title]</strong>
         // ----------------------------------------------------------------
         function wrapAttributions(text) {
             return text.replace(
                 /\bsaid\s+([A-Z][A-Za-z\u00C0-\u024F\s\-',.]+?[A-Za-z\u00C0-\u024F])(?=\.\s|\.$|\.")/g,
-                (match, name) => `said <strong>${name.trim()}</strong>`
+                (_, name) => `said <strong>${name.trim()}</strong>`
             );
         }
 
+        function processInline(text) {
+            return linkifyURLs(wrapAttributions(text));
+        }
 
-        // ----------------------------------------------------------------
-        // 4. FILENAME GENERATOR
-        // Converts a caption string into a kebab-case filename.
-        // "The 2025 project scope..." → "the-2025-project-scope..."
-        // The user still needs to verify/update the actual filename manually.
-        // ----------------------------------------------------------------
-        function captionToFilename(caption) {
-            return caption
-                .toLowerCase()
-                .replace(/[^a-z0-9\s]/g, '')   // strip punctuation
-                .trim()
-                .replace(/\s+/g, '-')           // spaces → hyphens
-                .slice(0, 45)                   // limit length
-                .replace(/-+$/, '');            // no trailing hyphen
+        function captionToFilename(text) {
+            return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim()
+                .replace(/\s+/g, '-').slice(0, 45).replace(/-+$/, '');
         }
 
 
         // ----------------------------------------------------------------
-        // 5. MAIN FORMATTER
-        // Returns { html: string, warnings: string[] }
+        // HTML INLINE EXTRACTOR
+        //
+        // This is the key piece for v6.
+        // Instead of using HTML for paragraph structure (which breaks when
+        // emails from Meltwater/PR services wrap every sentence in its own
+        // <p> tag), we use HTML ONLY to extract inline markup:
+        //   - <em> / <i>  → italics
+        //   - <a href>    → links (skips tracking redirect URLs)
+        //
+        // We return an array of { plain, rich } pairs:
+        //   plain = the raw text of the element (what's in text/plain)
+        //   rich  = the HTML version (<em>text</em> or <a href="...">text</a>)
+        //
+        // Later, applyInlineMarkup() does a string replace on each paragraph
+        // block to swap plain text → rich text wherever a match is found.
         // ----------------------------------------------------------------
-        function formatPressRelease(rawText) {
-            const warnings = [];
+        function extractInlineMarkup(htmlString) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(htmlString, 'text/html');
+            const markups = [];
+            let hasTrackingLinks = false;
+
+            // Extract <a> elements
+            doc.querySelectorAll('a').forEach(el => {
+                const href = (el.getAttribute('href') || '').trim();
+                // Normalize whitespace: collapse newlines/multiple spaces to single space
+                const plain = el.textContent.trim().replace(/\s+/g, ' ');
+                if (!plain || !href) return;
+                if (href.startsWith('mailto:') || href.startsWith('javascript:')) return;
+                if (isTrackingURL(href)) {
+                    // Don't skip — output an empty href so Pablo can fill in the real URL
+                    hasTrackingLinks = true;
+                    markups.push({ plain, rich: `<a href="">${plain}</a>` });
+                    return;
+                }
+                markups.push({ plain, rich: `<a href="${href}">${plain}</a>` });
+            });
+
+            // Extract <em> and <i> elements
+            doc.querySelectorAll('em, i').forEach(el => {
+                // Normalize whitespace so "A History of\nNew York" matches "A History of New York"
+                const plain = el.textContent.trim().replace(/\s+/g, ' ');
+                if (plain) markups.push({ plain, rich: `<em>${plain}</em>` });
+            });
+
+            // Longer matches first — prevents partial replacements swallowing longer ones
+            markups.sort((a, b) => b.plain.length - a.plain.length);
+
+            return { markups, hasTrackingLinks };
+        }
+
+
+        // ----------------------------------------------------------------
+        // INLINE MARKUP APPLIER
+        //
+        // Takes a paragraph string (plain text) and the markups array.
+        // For each { plain, rich } pair: if the plain text appears in the
+        // paragraph, replace it with the rich version.
+        //
+        // We escape the plain text before using it in a regex so special
+        // characters (parentheses, dots, etc.) don't break the match.
+        // ----------------------------------------------------------------
+        function escapeRegex(str) {
+            return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        function applyInlineMarkup(text, markups) {
+            // Normalize whitespace first so the paragraph text matches what
+            // we extracted from the HTML clipboard (which we also normalized).
+            // e.g. "A History of  New York" → "A History of New York"
+            let result = text.replace(/\s+/g, ' ');
+            for (const { plain, rich } of markups) {
+                if (!plain || !result.includes(plain)) continue;
+                result = result.split(plain).join(rich);
+            }
+            return result;
+        }
+
+
+        // ----------------------------------------------------------------
+        // PRESS METADATA EXTRACTOR
+        // Pulls title and date from the raw press text so we can populate
+        // the DOT page template header.
+        //
+        // Date comes from the "FOR IMMEDIATE RELEASE: Weekday, Month D, YYYY" line.
+        // We strip the weekday since the page template just shows "Month D, YYYY".
+        // Title is always the first non-empty, non-stripped line.
+        // ----------------------------------------------------------------
+        function extractPressMetadata(rawText) {
+            const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+
+            // Date: find the FOR IMMEDIATE RELEASE line
+            let date = '';
+            for (const line of lines) {
+                const m = line.match(/FOR IMMEDIATE RELEASE[:\s]+(?:\w+,\s+)?([A-Z][a-z]+ \d{1,2},\s*\d{4})/i);
+                if (m) { date = m[1]; break; }
+            }
+
+            // Title: first line that isn't a strip pattern
+            let title = '';
+            for (const line of lines) {
+                if (STRIP_PATTERNS.some(p => p.test(line))) continue;
+                if (line.length > 5) { title = toTitleCase(line); break; }
+            }
+
+            return { title, date };
+        }
+
+
+        // ----------------------------------------------------------------
+        // DOT PAGE TEMPLATE BUILDER
+        // Generates the standard header and footer includes that wrap
+        // every DOT press release page.
+        // ----------------------------------------------------------------
+        function buildPageHeader(title, date) {
+            const dateStr = date || 'DATE HERE';
+            const titleStr = title || 'TITLE HERE';
+            return `<!--#include virtual="../../includes/template/head.html"-->
+
+<title>${titleStr}</title>
+
+<!--#include virtual="../../includes/template/template-open.shtml"-->
+
+<header>
+    <div class="header-category-wrap" itemscope itemtype="http://data-vocabulary.org/Breadcrumb"> <a
+            href="../about/about.shtml" itemprop="url"><span itemprop="title" class="header-category">About
+                DOT</span></a>
+    </div>
+    <h1 class="header-title">Press Releases</h1>
+</header>
+<p class="post-header small">IMMEDIATE RELEASE<br />
+    ${dateStr}<br />
+    Contact: (212) 839-4850, <a href="mailto:press@dot.nyc.gov">press@dot.nyc.gov</a>
+</p>
+
+`;
+        }
+
+        function buildPageFooter() {
+            return `
+<!--#include virtual="../../includes/template/template-close.shtml"-->
+
+</body>
+
+</html>`;
+        }
+
+
+        // ----------------------------------------------------------------
+        // BLOCK GROUPER — v4 approach, unchanged
+        // Each non-empty line = its own paragraph block.
+        // Blank lines are discarded (just visual spacing in the email).
+        // ----------------------------------------------------------------
+        function groupIntoBlocks(lines) {
+            return lines
+                .map(l => l.trim())
+                .filter(l => l.length > 1 && !STRIP_PATTERNS.some(p => p.test(l)));
+        }
+
+
+        // ----------------------------------------------------------------
+        // MAIN FORMATTER
+        // ----------------------------------------------------------------
+        function formatPressRelease(paragraphs, markups, warnings) {
+
+            if (paragraphs.length === 0) return '<p>No content detected.</p>';
+
             const htmlParts = [];
 
-            // -- Strip email wrapper lines, split into clean lines --
-            const lines = rawText
-                .split('\n')
-                .map(l => l.trim())
-                .filter(l => !STRIP_PATTERNS.some(p => p.test(l)));
+            // -- Title
+            const rawTitle = paragraphs[0];
+            const title = maybeToTitleCase(rawTitle);
+            htmlParts.push(`<h2 id="page_subtitle">${title}</h2>`);
 
-            // -- Group lines into paragraph blocks (blank lines = block separator) --
-            const blocks = [];
-            let current = [];
-            for (const line of lines) {
-                if (line === '') {
-                    if (current.length > 0) {
-                        blocks.push(current.join(' ').trim());
-                        current = [];
-                    }
-                } else {
-                    current.push(line);
-                }
-            }
-            if (current.length > 0) blocks.push(current.join(' ').trim());
-
-            // Filter empty strings
-            const paragraphs = blocks.filter(b => b.length > 1);
-            if (paragraphs.length === 0) return { html: '<p>No content detected.</p>', warnings: [] };
-
-            // -- Title: always the first paragraph block --
-            htmlParts.push(`<h2 id="page_subtitle">${paragraphs[0]}</h2>`);
-
-            // -- Find the body start: paragraph that opens with "NEW YORK –" --
-            // Everything before this is considered pre-body (summaries/captions).
+            // -- Find body start ("NEW YORK –")
             const bodyStartIdx = paragraphs.findIndex(
-                (p, i) => i > 0 && /^NEW YORK\s*[–—\-]/.test(p)
+                (p, i) => i > 0 && /^NEW YORK\s*[–—\-]/i.test(p)
             );
-
-            // If not found, assume body starts at index 2 (after title + 1 summary)
             const bodyIdx = bodyStartIdx === -1 ? 2 : bodyStartIdx;
             if (bodyStartIdx === -1) {
                 warnings.push('Could not find "NEW YORK –" body opener. Body assumed to start at paragraph 2.');
             }
 
-            // -- Pre-body: italic summary bullets and first image caption --
-            const preBody = paragraphs.slice(1, bodyIdx);
-            for (const block of preBody) {
+            // -- Pre-body: italic summary lines + possible first image
+            for (const block of paragraphs.slice(1, bodyIdx)) {
+                const rich = applyInlineMarkup(block, markups);
                 if (looksLikeCaption(block)) {
                     const fn = captionToFilename(block);
                     htmlParts.push(
@@ -450,31 +716,152 @@
                     );
                     warnings.push(`Image placeholder → update filename: "${fn}.jpg"`);
                 } else {
-                    htmlParts.push(`<p align="center"><em>${block}</em></p>`);
+                    // Strip any <em> wrapper that applyInlineMarkup may have already added
+                    // to avoid <em><em>text</em></em> double-wrapping.
+                    const inner = rich.replace(/^<em>(.*)<\/em>$/s, '$1');
+                    htmlParts.push(`<p align="center"><em>${inner}</em></p>`);
                 }
             }
 
-            // -- Body paragraphs --
-            for (const para of paragraphs.slice(bodyIdx)) {
-                if (para === '###') {
-                    htmlParts.push(`\n<div class="thirty">###</div>`);
+            // -- Body
+            const body = paragraphs.slice(bodyIdx);
+            let i = 0;
+            let isFirstBodyPara = true; // used to bold NEW YORK – on the opening paragraph
 
-                } else if (looksLikeCaption(para)) {
+            while (i < body.length) {
+                const para = body[i];
+                // Apply inline markup (links, em) before any other processing
+                let rich = applyInlineMarkup(para, markups);
+
+                // Bold the "NEW YORK –" opener on the very first body paragraph.
+                // Handles –, —, or plain hyphen with optional whitespace.
+                if (isFirstBodyPara) {
+                    isFirstBodyPara = false;
+                    rich = rich.replace(/^(NEW YORK\s*[–—\-]+)/, '<strong>$1</strong>');
+                }
+
+                // Closing marker
+                if (para.trim() === '###') {
+                    htmlParts.push(`\n<div class="thirty">###</div>`);
+                    i++; continue;
+                }
+
+                // Image caption
+                if (looksLikeCaption(para)) {
                     const fn = captionToFilename(para);
                     htmlParts.push(
                         `<p align="center" style="margin-bottom: 0px;"><img src="../../images/pr2026/${fn}.jpg" alt="${para}"></img>\n</p>`,
                         `<p align="center"><em>${para}</em></p>`
                     );
                     warnings.push(`Image placeholder → update filename: "${fn}.jpg"`);
-
-                } else {
-                    // Regular paragraph — wrap speaker attributions in <strong>
-                    htmlParts.push(`<p>${wrapAttributions(para)}</p>`);
+                    i++; continue;
                 }
+
+                // Bullet: collect consecutive bullets into one <ul>
+                if (looksLikeBullet(para)) {
+                    const items = [];
+                    while (i < body.length && looksLikeBullet(body[i])) {
+                        const bulletRich = applyInlineMarkup(stripBullet(body[i]), markups);
+                        items.push(`  <li>${processInline(bulletRich)}</li>`);
+                        i++;
+                    }
+                    htmlParts.push(`<ul>\n${items.join('\n')}\n</ul>`);
+                    continue;
+                }
+
+                // List intro: line ending in ":" with bullets following
+                if (para.trim().endsWith(':') && i + 1 < body.length && looksLikeBullet(body[i + 1])) {
+                    htmlParts.push(`<p><strong>${processInline(rich)}</strong></p>`);
+                    i++; continue;
+                }
+
+                // Section header
+                if (looksLikeHeader(para)) {
+                    htmlParts.push(`<h4>${para}</h4>`);
+                    i++; continue;
+                }
+
+                // Regular paragraph — apply inline markup then run attributions + linkifier
+                htmlParts.push(`<p>${processInline(rich)}</p>`);
+                i++;
             }
 
-            return { html: htmlParts.join('\n\n'), warnings };
+            return htmlParts.join('\n\n');
         }
+
+
+        // ================================================================
+        //  PASTE INTERCEPTION
+        //
+        //  On paste we grab BOTH clipboard formats:
+        //    text/plain  → paragraph structure (line-based grouper, v4)
+        //    text/html   → inline markup only (extractInlineMarkup)
+        //
+        //  The plain text is shown in the textarea.
+        //  The HTML is parsed silently and its inline markups stored.
+        //  When Format is clicked, both are combined.
+        // ================================================================
+
+        let storedMarkups = [];      // { plain, rich } pairs from HTML clipboard
+        let hasHTMLClipboard = false;
+
+        const textareaEl = document.getElementById('inputText');
+        const pasteModeEl = document.getElementById('pasteMode');
+
+        function setPasteMode(mode, label) {
+            pasteModeEl.className = mode;
+            pasteModeEl.innerHTML = `<span class="dot"></span><span class="lbl">${label}</span>`;
+        }
+
+        textareaEl.addEventListener('paste', function (e) {
+            const htmlClip = e.clipboardData.getData('text/html');
+            const plainClip = e.clipboardData.getData('text/plain');
+
+            if (htmlClip && htmlClip.trim().length > 0) {
+                // Step 1: preventDefault and populate textarea immediately
+                // so the user sees content right away even before parsing finishes.
+                e.preventDefault();
+                const cleanPlain = plainClip.replace(/\r\n/g, '\n').trim();
+                this.value = cleanPlain;
+                document.getElementById('charCount').textContent =
+                    cleanPlain.length.toLocaleString() + ' chars';
+                setPasteMode('html', 'Parsing HTML clipboard...');
+
+                // Step 2: defer the heavy HTML parsing so the browser can
+                // render the textarea content first — prevents the freeze-then-blank issue.
+                const capturedHTML = htmlClip;
+                setTimeout(() => {
+                    const { markups, hasTrackingLinks } = extractInlineMarkup(capturedHTML);
+                    storedMarkups = markups;
+                    hasHTMLClipboard = true;
+                    const trackingNote = hasTrackingLinks
+                        ? ' — ⚠ tracking URLs replaced with empty &lt;a href=""&gt; — fill in manually'
+                        : '';
+                    setPasteMode('html', `✓ HTML paste — links &amp; italics captured${trackingNote}`);
+                }, 0);
+
+            } else {
+                // Plain text only — let browser handle it normally
+                storedMarkups = [];
+                hasHTMLClipboard = false;
+                setPasteMode('plain', 'Plain text paste — formatting not available');
+                setTimeout(() => {
+                    document.getElementById('charCount').textContent =
+                        this.value.length.toLocaleString() + ' chars';
+                }, 0);
+            }
+        });
+
+        // If user types/edits after pasting, the markups are stale — clear them
+        textareaEl.addEventListener('input', function () {
+            if (hasHTMLClipboard) {
+                storedMarkups = [];
+                hasHTMLClipboard = false;
+                setPasteMode('plain', 'Text edited — using plain text mode');
+            }
+            document.getElementById('charCount').textContent =
+                this.value.length.toLocaleString() + ' chars';
+        });
 
 
         // ================================================================
@@ -483,19 +870,34 @@
 
         let lastHTML = '';
 
-        document.getElementById('inputText').addEventListener('input', function () {
-            document.getElementById('charCount').textContent = this.value.length.toLocaleString() + ' chars';
-        });
-
         function runFormatter() {
-            const input = document.getElementById('inputText').value.trim();
+            const input = textareaEl.value.trim();
             if (!input) { alert('Paste a press release first.'); return; }
 
-            const { html, warnings } = formatPressRelease(input);
-            lastHTML = html;
+            const warnings = [];
 
+            // Use stored markups if we got an HTML paste, otherwise empty
+            const markups = hasHTMLClipboard ? storedMarkups : [];
+            if (hasHTMLClipboard && markups.length === 0) {
+                warnings.push('HTML clipboard was read but no inline markup (links/italics) was found.');
+            }
+
+            // Structure always comes from plain text — the proven v4 approach
+            const blocks = groupIntoBlocks(input.split('\n'));
+
+            // Extract title + date for the page template
+            const { title, date } = extractPressMetadata(input);
+
+            const bodyHTML = formatPressRelease(blocks, markups, warnings);
+            const header = buildPageHeader(title, date);
+            const footer = buildPageFooter();
+
+            // Build image placeholder block — appended before closing footer.
+            // User moves them to the correct position in the output manually.
+
+            lastHTML = header + bodyHTML + footer;
             document.getElementById('placeholder').style.display = 'none';
-            renderHighlighted(html);
+            renderHighlighted(lastHTML);
 
             const banner = document.getElementById('warningBanner');
             if (warnings.length > 0) {
@@ -506,22 +908,17 @@
             }
 
             document.getElementById('copyBtn').disabled = false;
+            document.getElementById('downloadBtn').disabled = false;
             document.getElementById('previewBtn').disabled = false;
         }
 
-        // Escape HTML for display, then re-colorize the <tags> for readability
         function renderHighlighted(html) {
             const escaped = html
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;');
-
-            // Color the tags green
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             const colored = escaped.replace(
                 /(&lt;\/?[\w][^&]*?&gt;)/g,
                 '<span style="color:#7ee787">$1</span>'
             );
-
             document.getElementById('htmlOutput').innerHTML = colored;
         }
 
@@ -531,35 +928,88 @@
                 const btn = document.getElementById('copyBtn');
                 btn.textContent = '✓ Copied!';
                 btn.classList.add('btn-ok');
-                setTimeout(() => {
-                    btn.textContent = 'Copy HTML';
-                    btn.classList.remove('btn-ok');
-                }, 2000);
+                setTimeout(() => { btn.textContent = 'Copy HTML'; btn.classList.remove('btn-ok'); }, 2000);
             });
+        }
+
+        function downloadHTML() {
+            if (!lastHTML) return;
+            // Build filename from the press title — kebab-case, trimmed to 60 chars
+            const titleEl = lastHTML.match(/<h2[^>]*>([^<]+)<\/h2>/);
+            const titleText = titleEl ? titleEl[1] : 'press-release';
+            const filename = titleText
+                .toLowerCase()
+                .replace(/[^a-z0-9\s]/g, '')
+                .trim()
+                .replace(/\s+/g, '-')
+                .slice(0, 60)
+                .replace(/-+$/, '') + '.shtml';
+
+            const blob = new Blob([lastHTML], { type: 'text/html' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(a.href);
         }
 
         function openPreview() {
             if (!lastHTML) return;
-            const win = window.open('', '_blank');
-            win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-<style>
-  body { font-family: Arial, sans-serif; max-width: 820px; margin: 40px auto; padding: 0 24px; line-height: 1.65; color: #222; }
-  h2 { font-size: 1.3rem; margin-bottom: 20px; }
-  img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
-  .thirty { text-align: center; margin-top: 30px; font-weight: bold; }
-</style></head><body>${lastHTML}</body></html>`);
-            win.document.close();
+            // Strip SSI includes and structural tags — browser can't process SSI
+            const previewHTML = lastHTML
+                .replace(/<!--#include[^>]*-->/g, '')
+                .replace(/<\/?(?:html|body)[^>]*>/gi, '')
+                .replace(/<title>[^<]*<\/title>/gi, '');
+
+            // Use an inline overlay + iframe instead of window.open().
+            // window.open() is blocked by browsers when running from file:// URLs.
+            const overlay = document.createElement('div');
+            overlay.id = 'previewOverlay';
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;flex-direction:column;';
+
+            const bar = document.createElement('div');
+            bar.style.cssText = 'background:#161b22;border-bottom:1px solid #30363d;padding:10px 20px;display:flex;align-items:center;gap:12px;flex-shrink:0;';
+            bar.innerHTML = `
+    <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.1em;">Preview</span>
+    <button onclick="document.getElementById('previewOverlay').remove()"
+      style="margin-left:auto;font-family:'IBM Plex Sans',sans-serif;font-size:13px;font-weight:600;padding:6px 14px;border-radius:6px;border:1px solid #30363d;background:transparent;color:#e6edf3;cursor:pointer;">✕ Close</button>
+  `;
+
+            // srcdoc works fine from file:// — avoids the security restriction entirely
+            const iframe = document.createElement('iframe');
+            iframe.style.cssText = 'flex:1;border:none;background:#fff;';
+            iframe.srcdoc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+    body{font-family:Arial,sans-serif;max-width:820px;margin:40px auto;padding:0 24px;line-height:1.65;color:#222;}
+    h2{font-size:1.3rem;margin-bottom:20px;}
+    h4{font-size:1rem;margin:24px 0 8px;}
+    ul{margin:8px 0 16px 24px;}
+    li{margin-bottom:6px;}
+    img{max-width:100%;height:auto;display:block;margin:0 auto;}
+    a{color:#1d6fa3;}
+    .thirty{text-align:center;margin-top:30px;font-weight:bold;}
+    .post-header{font-size:.85rem;color:#555;margin-bottom:20px;}
+    .header-title{font-size:1.5rem;margin-bottom:6px;}
+    .header-category{font-size:.8rem;color:#1d6fa3;text-transform:uppercase;}
+  </style></head><body>${previewHTML}</body></html>`;
+
+            overlay.appendChild(bar);
+            overlay.appendChild(iframe);
+            document.body.appendChild(overlay);
         }
 
         function clearAll() {
-            document.getElementById('inputText').value = '';
+            textareaEl.value = '';
             document.getElementById('htmlOutput').innerHTML = '';
             document.getElementById('charCount').textContent = '0 chars';
             document.getElementById('placeholder').style.display = 'block';
             document.getElementById('copyBtn').disabled = true;
+            document.getElementById('downloadBtn').disabled = true;
             document.getElementById('previewBtn').disabled = true;
             document.getElementById('warningBanner').style.display = 'none';
+            storedMarkups = [];
+            hasHTMLClipboard = false;
             lastHTML = '';
+            setPasteMode('plain', 'Waiting for paste...');
         }
     </script>
 </body>
